@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: broken-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      containers:
+      - name: api
+        image: python:3.9-slim
+        command:
+          - /bin/sh
+          - -c
+          - |
+            cat <<'EOF' > /app.py
+            import os
+            from http.server import BaseHTTPRequestHandler, HTTPServer
+
+            REDIS_HOST = os.getenv("REDIS_HOST", "redis")
+            REDIS_PORT = os.getenv("REDIS_PORT", "6379")
+
+            class Handler(BaseHTTPRequestHandler):
+                def do_GET(self):
+                    if self.path == "/health":
+                        self.send_response(200)
+                        self.send_header("Content-type", "text/plain")
+                        self.end_headers()
+                        self.wfile.write(b"OK")
+                    elif self.path == "/":
+                        self.send_response(200)
+                        self.send_header("Content-type", "text/plain")
+                        self.end_headers()
+                        message = f"API OK - Redis host: {REDIS_HOST}, Redis port: {REDIS_PORT}"
+                        self.wfile.write(message.encode())
+                    else:
+                        self.send_response(404)
+                        self.end_headers()
+
+            server = HTTPServer(("0.0.0.0", 5000), Handler)
+            server.serve_forever()
+            EOF
+            python /app.py
+        ports:
+        - containerPort: 5000
+        envFrom:
+        - configMapRef:
+            name: api-config
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 3
+          periodSeconds: 5
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "200m"
+            memory: "256Mi"
